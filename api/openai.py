@@ -48,7 +48,7 @@ class TTSRequest(BaseModel):
     partial_narration: str = Field(..., max_length=4096)  # TTS 文字数上限 :contentReference[oaicite:6]{index=6}
 
 
-router = APIRouter(prefix="/api", tags=["role_play"])
+router = APIRouter(prefix="/openai", tags=["role_play"])
 
 
 # ------------- ヘルパー：クライアント生成（毎リクエスト） ------------- #
