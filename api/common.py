@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter(prefix="/common", tags=["starter"])
 
 # データのスキーマを定義するためのクラス
 class EchoMessage(BaseModel):
