@@ -34,16 +34,6 @@ def read_one_user(id: str = Query(...)):
     return result_obj[0] if result_obj else None
 
 
-@router.get("/allusers")
-def read_all_user():
-    result = crud.myselectAll(mymodels.User)
-    # 結果がNoneの場合は空配列を返す
-    if not result:
-        return []
-    # JSON文字列をPythonオブジェクトに変換
-    return json.loads(result)
-
-
 @router.put("/user")
 def update_user(user: mymodels.User):
     values = user.dict()
