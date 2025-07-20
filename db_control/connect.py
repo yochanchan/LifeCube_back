@@ -1,10 +1,12 @@
 from sqlalchemy import create_engine
+from pathlib import Path
 
 import os
 from dotenv import load_dotenv
 
 # 環境変数の読み込み
 load_dotenv()
+CA_FILE = Path("/tmp/BaltimoreCyberTrustRoot.pem")
 
 # データベース接続情報
 DB_USER = os.getenv('DB_USER')
@@ -23,9 +25,7 @@ engine = create_engine(
     echo=True,
     pool_pre_ping=True,
     pool_recycle=3600,
-    connect_args={
-        # PyMySQL のフラグで検証を必須にする
-        "ssl_verify_cert": True,          # 証明書チェーンを検証
-        "ssl_verify_identity": True       # ホスト名一致を確認
+    connect_args = {
+    "ssl": {"ca": str(CA_FILE)}   # ← PyMySQL が理解できる形
     }
 )
