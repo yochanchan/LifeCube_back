@@ -11,8 +11,8 @@ from db_control import crud, mymodels
 
 
 
-##### insert　this.userをinsertする。userが型ヒントですよ。
-@router.post("/users")
+##### insert　this.Userをinsertする。Userが型ヒントですよ。
+@router.post("/user")
 def create_user(user: mymodels.User):
     values = user.dict()
     tmp = crud.myinsert(mymodels.User, values)
@@ -25,7 +25,7 @@ def create_user(user: mymodels.User):
 
 
 
-@router.get("/users")
+@router.get("/user")
 def read_one_user(id: str = Query(...)):
     result = crud.myselect(mymodels.User, id)
     if not result:
@@ -44,8 +44,8 @@ def read_all_user():
     return json.loads(result)
 
 
-@router.put("/users")
-def update_user(user: user):
+@router.put("/user")
+def update_user(user: mymodels.User):
     values = user.dict()
     values_original = values.copy()
     tmp = crud.myupdate(mymodels.User, values)
@@ -56,7 +56,7 @@ def update_user(user: user):
     return result_obj[0] if result_obj else None
 
 
-@router.delete("/users")
+@router.delete("/user")
 def delete_user(id: str = Query(...)):
     result = crud.mydelete(mymodels.User, id)
     if not result:
