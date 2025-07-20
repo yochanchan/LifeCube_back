@@ -42,16 +42,16 @@ def myselect(mymodel, id):
             result = query.all()
         # 結果をオブジェクトから辞書に変換し、リストに追加
         result_dict_list = []
-        for user_info in result:
+        for users_info in result:
             result_dict_list.append({
-                "customer_id": user_info.id,
-                "customer_name": user_info.user_name,
-                "age": user_info.sex,
-                "birthday": user_info.birthday,
-                "shozoku": user_info.shozoku,
-                "shokui": user_info.shokui,
-                "skill": user_info.skill,
-                "other": user_info.other
+                "customer_id": users_info.id,
+                "customer_name": users_info.users_name,
+                "age": users_info.sex,
+                "birthday": users_info.birthday,
+                "shozoku": users_info.shozoku,
+                "shokui": users_info.shokui,
+                "skill": users_info.skill,
+                "other": users_info.other
             })
         # リストをJSONに変換
         result_json = json.dumps(result_dict_list, ensure_ascii=False)
