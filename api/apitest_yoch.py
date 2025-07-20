@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-router = APIRouter(prefix="/youc", tags=["starter"])
+router = APIRouter(prefix="/youc", tags=["yochan"])
 
 
 from fastapi import FastAPI, HTTPException, Query
