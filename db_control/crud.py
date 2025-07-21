@@ -1,121 +1,75 @@
-# uname() error回避
-import platform
-print("platform", platform.uname())
+from __future__ import annotations
 
-from sqlalchemy import create_engine, insert, delete, update, select
-import sqlalchemy
-from sqlalchemy.orm import sessionmaker
 import json
+from datetime import date
+from typing import Any, Dict, List
+
 import pandas as pd
+import sqlalchemy
+from sqlalchemy import insert, delete, update, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+
 from db_control.connect import engine
-from db_control.mymodels import User
+
+# セッションファクトリ
+SessionLocal = sessionmaker(bind=engine)
 
 
-def myinsert(mymodel, values):
-    # session構築
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
-    query = insert(mymodel).values(values)
-    try:
-        # トランザクションを開始
-        with session.begin():
-            # データの挿入
-            result = session.execute(query)
-    except sqlalchemy.exc.IntegrityError:
-        print("一意制約違反により、挿入に失敗しました")
-        session.rollback()
-
-    # セッションを閉じる
-    session.close()
-    return "inserted"
+# ---------- 共通ユーティリティ ----------
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    """SQLAlchemy ORM オブジェクト → dict へ変換（date は isoformat）"""
+    return {
+        "id": row.id,
+        "user_name": row.user_name,
+        "sex": row.sex,
+        "birthday": row.birthday.isoformat() if isinstance(row.birthday, date) else None,
+        "shozoku": row.shozoku,
+        "shokui": row.shokui,
+        "skill": row.skill,
+        "other": row.other,
+    }
 
 
-def myselect(mymodel, id):
-    # session構築
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    query = session.query(mymodel).filter(mymodel.id == id)
-    try:
-        # トランザクションを開始
-        with session.begin():
-            result = query.all()
-        # 結果をオブジェクトから辞書に変換し、リストに追加
-        result_dict_list = []
-        for users_info in result:
-            result_dict_list.append({
-                "customer_id": users_info.id,
-                "customer_name": users_info.users_name,
-                "age": users_info.sex,
-                "birthday": users_info.birthday,
-                "shozoku": users_info.shozoku,
-                "shokui": users_info.shokui,
-                "skill": users_info.skill,
-                "other": users_info.other
-            })
-        # リストをJSONに変換
-        result_json = json.dumps(result_dict_list, ensure_ascii=False)
-    except sqlalchemy.exc.IntegrityError:
-        print("一意制約違反により、挿入に失敗しました")
-
-    # セッションを閉じる
-    session.close()
-    return result_json
+# ---------- CRUD ----------
+def myinsert(model, values: dict[str, Any]) -> None:
+    """1レコード挿入"""
+    with SessionLocal() as session, session.begin():
+        try:
+            session.execute(insert(model).values(**values))
+        except IntegrityError as e:
+            session.rollback()
+            raise e
 
 
-def myselectAll(mymodel):
-    # session構築
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    query = select(mymodel)
-    try:
-        # トランザクションを開始
-        with session.begin():
-            df = pd.read_sql_query(query, con=engine)
-            result_json = df.to_json(orient='records', force_ascii=False)
-
-    except sqlalchemy.exc.IntegrityError:
-        print("一意制約違反により、挿入に失敗しました")
-        result_json = None
-
-    # セッションを閉じる
-    session.close()
-    return result_json
+def myselect(model, record_id: int) -> List[Dict[str, Any]]:
+    """主キー検索して list[dict] で返却"""
+    with SessionLocal() as session, session.begin():
+        result = session.query(model).filter(model.id == record_id).all()
+        return [_row_to_dict(row) for row in result]
 
 
-def myupdate(mymodel, values):
-    # session構築
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
-    id = values.pop("id")
-
-    query = update(mymodel).where(mymodel.id == id).values(values)
-    try:
-        # トランザクションを開始
-        with session.begin():
-            result = session.execute(query)
-    except sqlalchemy.exc.IntegrityError:
-        print("一意制約違反により、挿入に失敗しました")
-        session.rollback()
-    # セッションを閉じる
-    session.close()
-    return "put"
+def myselectAll(model) -> List[Dict[str, Any]]:
+    """全件取得"""
+    with SessionLocal() as session, session.begin():
+        df = pd.read_sql(select(model), con=session.bind)
+    # pandas が date を自動で文字列化してくれる
+    return df.to_dict(orient="records")
 
 
-def mydelete(mymodel, id):
-    # session構築
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    query = delete(mymodel).where(mymodel.id == id)
-    try:
-        # トランザクションを開始
-        with session.begin():
-            result = session.execute(query)
-    except sqlalchemy.exc.IntegrityError:
-        print("一意制約違反により、挿入に失敗しました")
-        session.rollback()
+def myupdate(model, values: dict[str, Any]) -> None:
+    """主キー更新 (全項目)"""
+    record_id = values.pop("id")
+    with SessionLocal() as session, session.begin():
+        try:
+            session.execute(update(model).where(model.id == record_id).values(**values))
+        except IntegrityError as e:
+            session.rollback()
+            raise e
 
-    # セッションを閉じる
-    session.close()
-    return id + " is deleted"
+
+def mydelete(model, record_id: int) -> bool:
+    """主キー削除"""
+    with SessionLocal() as session, session.begin():
+        res = session.execute(delete(model).where(model.id == record_id))
+        return res.rowcount > 0

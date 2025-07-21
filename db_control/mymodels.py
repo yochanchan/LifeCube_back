@@ -1,4 +1,7 @@
-from sqlalchemy import String, Integer, ForeignKey
+from __future__ import annotations
+
+from datetime import date
+from sqlalchemy import String, Integer, Date, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -6,16 +9,17 @@ class Base(DeclarativeBase):
     pass
 
 
-class User(Base):
-    __tablename__ = 'users'
-    id: Mapped[str] = mapped_column(Integer, primary_key=True)
+class Users(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_name: Mapped[str] = mapped_column(String(10))
     sex: Mapped[str] = mapped_column(String(5))
-    birthday: Mapped[str] = mapped_column(String(10))
-    shozoku: Mapped[str] = mapped_column(String(45))
-    shokui: Mapped[str] = mapped_column(String(45))
-    skill: Mapped[str] = mapped_column(String(45))
-    other: Mapped[str] = mapped_column(String(10))
+    birthday: Mapped[date] = mapped_column(Date)
+    shozoku: Mapped[str | None] = mapped_column(String(45))
+    shokui: Mapped[str | None] = mapped_column(String(45))
+    skill: Mapped[str | None] = mapped_column(String(45))
+    other: Mapped[str | None] = mapped_column(String(200))
 
 
 class Items(Base):
