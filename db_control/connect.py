@@ -1,29 +1,30 @@
+from __future__ import annotations
 from sqlalchemy import create_engine
-
-import os
 from dotenv import load_dotenv
+import os
 
-# 環境変数の読み込み
 load_dotenv()
 
-# データベース接続情報
-DB_USER = os.getenv('DB_USER')
-DB_PASSWORD = os.getenv('DB_PASSWORD')
-DB_HOST = os.getenv('DB_HOST')
-DB_PORT = os.getenv('DB_PORT')
-DB_NAME = os.getenv('DB_NAME')
+# 共通情報
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "3306")
+DB_NAME = os.getenv("DB_NAME")
 
 # MySQLのURL構築
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = (
+    f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+)
 
-SSL_CA_PATH = os.getenv('SSL_CA_PATH')
-# エンジンの作成
+# ── 環境で CA パスが指定されていれば追加 ──
+ssl_ca_path = os.getenv("SSL_CA_PATH")          # .env で指定（ローカルだけ入れる）
+connect_kwargs = {"ssl_ca": ssl_ca_path} if ssl_ca_path else {}
+
 engine = create_engine(
     DATABASE_URL,
-    echo=True,
+    echo=True,             # 運用時は False 推奨
     pool_pre_ping=True,
     pool_recycle=3600,
-    connect_args={
-        "ssl_ca": SSL_CA_PATH
-    }
+    connect_args=connect_kwargs,
 )
