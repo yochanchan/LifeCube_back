@@ -7,6 +7,7 @@ from api.apitest_eiko import router as apitest_eiko_router
 from api.apitest_hama import router as apitest_hama_router
 from api.apitest_yuka import router as apitest_yuka_router
 from api.apitest_yoch import router as apitest_yoch_router
+from api.ws_test import router as wb_test_router
 
 
 app = FastAPI()
@@ -31,3 +32,4 @@ app.include_router(apitest_hama_router)
 app.include_router(apitest_yuka_router)
 app.include_router(apitest_eiko_router)
 app.include_router(apitest_yoch_router)
+app.include_router(wb_test_router)
