@@ -50,3 +50,9 @@ venv/
 env/
 __pycache__/
 *.pyc
+
+# Googleの認証キー（.jsonで終わるファイルすべて）
+*.json
+
+# 環境変数を書くファイル
+.env
