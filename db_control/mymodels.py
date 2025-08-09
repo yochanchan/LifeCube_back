@@ -122,8 +122,8 @@ class PictureData(Base):
     __tablename__ = "picture_data"
 
     picture_id: Mapped[int] = mapped_column(
-        ForeignKey("picture.picture_id", ondelete="CASCADE"),
         BigInteger,
+        ForeignKey("picture.picture_id", ondelete="CASCADE"),
         primary_key=True,
     )
     image_binary: Mapped[bytes] = mapped_column(MEDIUMBLOB, nullable=False)
