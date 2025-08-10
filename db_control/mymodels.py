@@ -98,7 +98,11 @@ class Picture(Base):
     account: Mapped["Account"] = relationship(back_populates="pictures")
     trip: Mapped[Optional["Trip"]] = relationship(back_populates="pictures")
     data: Mapped[Optional["PictureData"]] = relationship(
-        back_populates="picture", uselist=False
+        back_populates="picture",
+        uselist=False,
+        cascade="all, delete-orphan",   # 子を明示的に先に DELETE する
+        passive_deletes=True,           # DB の ON DELETE CASCADE に任せる（NULL化しない）
+        single_parent=True,             # 1対1の整合性
     )
 
     # Indexes（DDL に合わせて作成）
