@@ -1,4 +1,3 @@
-# backend/db_control/crud.py
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -7,13 +6,12 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select, func
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
-from db_control.connect import engine
 from db_control.mymodels import Account, Trip, Picture, PictureData
 
+# アプリ標準タイムゾーン（JST）
 JST = timezone(timedelta(hours=9))
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def _now_jst() -> datetime:
     return datetime.now(JST)
@@ -53,23 +51,23 @@ def _picture_to_dict(p: Picture, thumb_w: int | None = None) -> Dict[str, Any]:
 
 # 1) picture が存在する日付（JST）
 def list_picture_dates(
+    db: Session,
     account_id: Optional[int] = None,
     trip_id: Optional[int] = None,
 ) -> List[str]:
-    with SessionLocal() as session:
-        day_expr = func.date(Picture.pictured_at)
-        stmt = select(day_expr)
-        # 任意フィルター
-        if account_id is not None:
-            stmt = stmt.where(Picture.account_id == account_id)
-        if trip_id is not None:
-            stmt = stmt.where(Picture.trip_id == trip_id)
-        stmt = stmt.group_by(day_expr).order_by(day_expr.asc())
-        rows = session.execute(stmt).all()
-        return [r[0].isoformat() if isinstance(r[0], date) else str(r[0]) for r in rows]
+    day_expr = func.date(Picture.pictured_at)
+    stmt = select(day_expr)
+    if account_id is not None:
+        stmt = stmt.where(Picture.account_id == account_id)
+    if trip_id is not None:
+        stmt = stmt.where(Picture.trip_id == trip_id)
+    stmt = stmt.group_by(day_expr).order_by(day_expr.asc())
+    rows = db.execute(stmt).all()
+    return [r[0].isoformat() if isinstance(r[0], date) else str(r[0]) for r in rows]
 
 # 2) 指定1日分の picture 一覧（メタ＋サムネURLヒント）
 def list_pictures_by_date(
+    db: Session,
     account_id: Optional[int],
     target_date: date | str,
     trip_id: Optional[int] = None,
@@ -77,40 +75,41 @@ def list_pictures_by_date(
     thumb_w: int = 256,
 ) -> List[Dict[str, Any]]:
     start, end = _day_bounds(target_date)
-    with SessionLocal() as session:
-        stmt = select(Picture).where(
-            Picture.pictured_at >= start,
-            Picture.pictured_at < end,
-        )
-        if account_id is not None:
-            stmt = stmt.where(Picture.account_id == account_id)
-        if trip_id is not None:
-            stmt = stmt.where(Picture.trip_id == trip_id)
-        stmt = stmt.order_by(Picture.pictured_at.desc() if order_desc else Picture.pictured_at.asc())
-        pics = session.scalars(stmt).all()
-        return [_picture_to_dict(p, thumb_w=thumb_w) for p in pics]
+    stmt = select(Picture).where(
+        Picture.pictured_at >= start,
+        Picture.pictured_at < end,
+    )
+    if account_id is not None:
+        stmt = stmt.where(Picture.account_id == account_id)
+    if trip_id is not None:
+        stmt = stmt.where(Picture.trip_id == trip_id)
+    stmt = stmt.order_by(Picture.pictured_at.desc() if order_desc else Picture.pictured_at.asc())
+    pics = db.scalars(stmt).all()
+    return [_picture_to_dict(p, thumb_w=thumb_w) for p in pics]
 
-def delete_picture_one(picture_id: int, owner_account_id: Optional[int] = None) -> bool:
-    with SessionLocal() as session, session.begin():
-        pic = session.get(Picture, picture_id)
+def delete_picture_one(db: Session, picture_id: int, owner_account_id: Optional[int] = None) -> bool:
+    # 書き込み系は明示トランザクション
+    with db.begin():
+        pic = db.get(Picture, picture_id)
         if not pic:
             return False
         if owner_account_id is not None and pic.account_id != owner_account_id:
             return False
-        session.delete(pic)
-        return True
+        db.delete(pic)
+    return True
 
-def create_trip(account_id: int, started_at: Optional[datetime] = None) -> int:
+def create_trip(db: Session, account_id: int, started_at: Optional[datetime] = None) -> int:
     started_at = started_at or _now_jst()
-    with SessionLocal() as session, session.begin():
-        if not session.get(Account, account_id):
+    with db.begin():
+        if not db.get(Account, account_id):
             raise ValueError(f"account not found: {account_id}")
         trip = Trip(account_id=account_id, trip_started_at=_to_jst_naive(started_at))
-        session.add(trip)
-        session.flush()
+        db.add(trip)
+        db.flush()
         return trip.trip_id
 
 def create_picture_with_data(
+    db: Session,
     *,
     account_id: int,
     trip_id: Optional[int],
@@ -136,11 +135,11 @@ def create_picture_with_data(
     digest = sha256(image_binary).digest()
     size = len(image_binary)
 
-    with SessionLocal() as session, session.begin():
-        if not session.get(Account, account_id):
+    with db.begin():
+        if not db.get(Account, account_id):
             raise ValueError(f"account not found: {account_id}")
         if trip_id is not None:
-            t = session.get(Trip, trip_id)
+            t = db.get(Trip, trip_id)
             if not t:
                 raise ValueError(f"trip not found: {trip_id}")
             if t.account_id != account_id:
@@ -160,59 +159,58 @@ def create_picture_with_data(
             image_size=size,
             sha256=digest,
         )
-        session.add(pic)
-        session.flush()
+        db.add(pic)
+        db.flush()  # picture_id 採番
 
         pdata = PictureData(picture_id=pic.picture_id, image_binary=image_binary)
-        session.add(pdata)
+        db.add(pdata)
 
         return pic.picture_id
 
-def get_picture_image(picture_id: int) -> Optional[Tuple[str, bytes]]:
-    with SessionLocal() as session:
-        pic = session.get(Picture, picture_id)
-        if not pic:
-            return None
-        data = session.get(PictureData, picture_id)
-        if not data:
-            return None
-        return (pic.content_type, data.image_binary)
+def get_picture_image(db: Session, picture_id: int) -> Optional[Tuple[str, bytes]]:
+    pic = db.get(Picture, picture_id)
+    if not pic:
+        return None
+    data = db.get(PictureData, picture_id)
+    if not data:
+        return None
+    return (pic.content_type, data.image_binary)
 
 def get_picture_thumbnail(
+    db: Session,
     picture_id: int,
     max_px: int = 256,
     prefer_webp: bool = True,
 ) -> Optional[Tuple[str, bytes]]:
-    with SessionLocal() as session:
-        data = session.get(PictureData, picture_id)
-        if not data:
-            return None
-        try:
-            from PIL import Image
-        except ImportError:
-            raise RuntimeError("Pillow が必要です。`pip install Pillow` を実行してください。")
-        with Image.open(BytesIO(data.image_binary)) as im:
-            im = im.convert("RGB")
-            im.thumbnail((max_px, max_px))
-            out = BytesIO()
-            if prefer_webp:
-                im.save(out, format="WEBP", quality=80, method=6)
-                return ("image/webp", out.getvalue())
-            else:
-                im.save(out, format="JPEG", quality=80, optimize=True, progressive=True)
-                return ("image/jpeg", out.getvalue())
+    data = db.get(PictureData, picture_id)
+    if not data:
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        raise RuntimeError("Pillow が必要です。pip install Pillow を実行してください。")
+    with Image.open(BytesIO(data.image_binary)) as im:
+        im = im.convert("RGB")
+        im.thumbnail((max_px, max_px))
+        out = BytesIO()
+        if prefer_webp:
+            im.save(out, format="WEBP", quality=80, method=6)
+            return ("image/webp", out.getvalue())
+        else:
+            im.save(out, format="JPEG", quality=80, optimize=True, progressive=True)
+            return ("image/jpeg", out.getvalue())
 
 def count_pictures_by_date(
+    db: Session,
     account_id: Optional[int] = None,
     trip_id: Optional[int] = None,
 ) -> Dict[str, int]:
-    with SessionLocal() as session:
-        day_expr = func.date(Picture.pictured_at)
-        stmt = select(day_expr, func.count())
-        if account_id is not None:
-            stmt = stmt.where(Picture.account_id == account_id)
-        if trip_id is not None:
-            stmt = stmt.where(Picture.trip_id == trip_id)
-        stmt = stmt.group_by(day_expr).order_by(day_expr.asc())
-        rows = session.execute(stmt).all()
-        return {(d.isoformat() if isinstance(d, date) else str(d)): c for d, c in rows}
+    day_expr = func.date(Picture.pictured_at)
+    stmt = select(day_expr, func.count())
+    if account_id is not None:
+        stmt = stmt.where(Picture.account_id == account_id)
+    if trip_id is not None:
+        stmt = stmt.where(Picture.trip_id == trip_id)
+    stmt = stmt.group_by(day_expr).order_by(day_expr.asc())
+    rows = db.execute(stmt).all()
+    return {(d.isoformat() if isinstance(d, date) else str(d)): c for d, c in rows}

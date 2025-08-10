@@ -1,4 +1,3 @@
-# backend/db_control/mymodels.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,22 +12,22 @@ from sqlalchemy import (
     BigInteger,
     Index,
     text,
+    Enum,            # 追加
+    LargeBinary,     # 追加（VARBINARY(60) 相当で利用）
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-# MySQL 方言タイプ（UNSIGNED / BINARY / MEDIUMBLOB / DATETIME(6) 用）
+# MySQL 方言タイプ（UNSIGNED / BINARY / MEDIUMBLOB 用）
 from sqlalchemy.dialects.mysql import (
     INTEGER as MySQLInteger,
     BINARY as MySQLBinary,
     MEDIUMBLOB,
-    DATETIME as MySQLDateTime,
+    # DATETIME 方言は使わず汎用 DateTime に統一
 )
-
 
 class Base(DeclarativeBase):
     """Declarative base for all models."""
     pass
-
 
 # -------------------------
 # account
@@ -39,13 +38,25 @@ class Account(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
+    # 追加: 認証/権限列
+    password_hash: Mapped[bytes] = mapped_column(LargeBinary(60), nullable=False)  # VARBINARY(60) 相当
+    role: Mapped[str] = mapped_column(
+        Enum("admin", "user", name="account_role"),
+        nullable=False,
+        server_default=text("'user'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
     # Relationships
     trips: Mapped[List["Trip"]] = relationship(back_populates="account")
     pictures: Mapped[List["Picture"]] = relationship(back_populates="account")
 
     def __repr__(self) -> str:
-        return f"<Account id={self.id} email={self.email!r}>"
-
+        return f"<Account id={self.id} email={self.email!r} role={self.role!r}>"
 
 # -------------------------
 # trip
@@ -63,7 +74,6 @@ class Trip(Base):
 
     def __repr__(self) -> str:
         return f"<Trip id={self.trip_id} account_id={self.account_id} started_at={self.trip_started_at!r}>"
-
 
 # -------------------------
 # picture
@@ -89,9 +99,9 @@ class Picture(Base):
     image_size: Mapped[int] = mapped_column(MySQLInteger(unsigned=True), nullable=False)
     sha256: Mapped[Optional[bytes]] = mapped_column(MySQLBinary(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        MySQLDateTime(fsp=6),
+        DateTime,
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP(6)"),
+        server_default=text("CURRENT_TIMESTAMP"),
     )
 
     # Relationships
@@ -117,7 +127,6 @@ class Picture(Base):
             f"<Picture id={self.picture_id} account_id={self.account_id} "
             f"trip_id={self.trip_id} pictured_at={self.pictured_at!r}>"
         )
-
 
 # -------------------------
 # picture_data (1:1, PK=FK)
