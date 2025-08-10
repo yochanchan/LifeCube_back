@@ -52,7 +52,7 @@ async def create_picture(
 def get_dates(
     account_id: Optional[int] = Query(None, ge=1),
     trip_id: Optional[int] = Query(None, ge=1),
-):
+    ):
     """JST基準で picture が存在する日付の一覧を返す。account_id 未指定なら全アカウント横断。"""
     return crud.list_picture_dates(account_id=account_id, trip_id=trip_id)
 
@@ -110,3 +110,17 @@ def get_thumbnail(picture_id: int, w: int = Query(256, ge=64, le=1024)):
         media_type=content_type,
         headers={"Cache-Control": "no-store, max-age=0, must-revalidate"},
     )
+
+# ---------------------------
+# Delete
+# ---------------------------
+@router.delete("/{picture_id}", status_code=204)
+def delete_picture(
+    picture_id: int,
+    account_id: Optional[int] = Query(None, ge=1),
+    ):
+    ok = crud.delete_picture_one(picture_id=picture_id, owner_account_id=account_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="picture not found")
+    # 204 No Content
+    return Response(status_code=204)
