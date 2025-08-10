@@ -10,7 +10,7 @@ from api.apitest_yoch import router as apitest_yoch_router
 from api.ws_test import router as ws_test_router
 from api.speech_test import router as speech_test_router
 from api.pictures import router as pictures_router
-
+from api.auth import router as auth_router
 
 
 app = FastAPI()
@@ -38,4 +38,4 @@ app.include_router(apitest_yoch_router)
 app.include_router(ws_test_router)
 app.include_router(speech_test_router)
 app.include_router(pictures_router)
-
+app.include_router(auth_router)
