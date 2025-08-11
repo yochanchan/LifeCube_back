@@ -33,6 +33,10 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+        db.commit()          # ← 正常終了時は commit
+    except Exception:
+        db.rollback()        # ← 例外なら rollback
+        raise
     finally:
         db.close()
 
