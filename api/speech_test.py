@@ -12,7 +12,7 @@ from dotenv import load_dotenv # 追加
 # .envファイルから環境変数をプログラムに読み込む
 load_dotenv()
 
-router = APIRouter()
+router = APIRouter(prefix="/speech", tags=["speech"])
 
 # --- 認証情報の設定 ---
 # .envファイルからBase64エンコードされた認証情報を取得
