@@ -7,110 +7,81 @@ router = APIRouter(prefix="/ws_test", tags=["websocket_test"])
 
 class ConnectionManager:
     def __init__(self):
-        self.active: Dict[str, WebSocket] = {}
+        self.rooms: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, cid: str, ws: WebSocket):
+    async def connect(self, room_id: str, ws: WebSocket):
         await ws.accept()
-        self.active[cid] = ws
+        if room_id not in self.rooms:
+            self.rooms[room_id] = []
+        self.rooms[room_id].append(ws)
+        print(f"🔗 クライアントがルーム {room_id} に接続しました")
 
-    def disconnect(self, cid: str):
-        self.active.pop(cid, None)
+    def disconnect(self, room_id: str, ws: WebSocket):
+        if room_id in self.rooms:
+            if ws in self.rooms[room_id]:
+                self.rooms[room_id].remove(ws)
+            if not self.rooms[room_id]:
+                del self.rooms[room_id]
+        print(f"🔌 クライアントがルーム {room_id} から切断されました")
 
-    async def broadcast(self, msg: dict):
-        dead = []
-        for cid, ws in self.active.items():
-            try:
-                await ws.send_json(msg)          # ← 辞書は send_json で送信
-            except WebSocketDisconnect:
-                dead.append(cid)
-        for cid in dead:                         # ← 切断済みをクリーンアップ
-            self.disconnect(cid)
+    async def broadcast_to_room(self, room_id: str, msg: dict):
+        if room_id in self.rooms:
+            dead_connections = []
+            for ws in self.rooms[room_id]:
+                try:
+                    await ws.send_json(msg)
+                except WebSocketDisconnect:
+                    dead_connections.append(ws)
+            
+            # 切断された接続をクリーンアップ
+            for ws in dead_connections:
+                self.disconnect(room_id, ws)
 
 manager = ConnectionManager()
-history: List[dict] = []
-
-# @router.websocket("/ws/{client_id}")
-# async def socket(ws: WebSocket, client_id: str):
-#     await manager.connect(client_id, ws)
-
-#     # 既存履歴を新規クライアントへ送信
-#     for msg in history:
-#         await ws.send_json(msg)
-
-#     try:
-#         while True:
-#             msg = await ws.receive_json()
-
-#             # ★ delete 以外は必ず id を補完
-#             if msg["type"] != "delete":
-#                 msg.setdefault("id", str(uuid4()))
-
-#             if msg["type"] == "chat":
-#                 history.append(msg)
-#             elif msg["type"] == "delete":
-#                 history[:] = [m for m in history if m["id"] != msg["id"]]
-
-#             await manager.broadcast(msg)
-
-#     except WebSocketDisconnect:
-#         manager.disconnect(client_id)
-
-
-
-#沢田つけたし
-class Room:
-    def __init__(self):
-        self.clients: List[WebSocket] = set()
-        self.latest_image_base64: str | None = None
-
-rooms: Dict[str, Room] = {}
-
-async def get_room(room_id: str) -> Room:
-    if room_id not in rooms:
-        rooms[room_id] = Room()
-    return rooms[room_id]
-
-@router.get("/")
-async def root():
-    return {"status": "ok", "message": "WebSocket server running"}
+history: Dict[str, List[dict]] = {}
 
 @router.websocket("/ws/{room_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str):
-    room = await get_room(room_id)
-    await websocket.accept()
-    room.clients.add(websocket)
+async def socket(ws: WebSocket, room_id: str):
+    await manager.connect(room_id, ws)
 
-    # 接続直後、最新画像があればすぐ送る（途中参加のdisplayにも表示される）
-    if room.latest_image_base64:
-        await websocket.send_text(json.dumps({
-            "type": "image",
-            "data": room.latest_image_base64
-        }))
+    # ルームの履歴を初期化
+    if room_id not in history:
+        history[room_id] = []
+
+    # 既存履歴を新規クライアントへ送信
+    for msg in history[room_id]:
+        try:
+            await ws.send_json(msg)
+        except WebSocketDisconnect:
+            break
 
     try:
         while True:
-            message = await websocket.receive_text()
-            payload = json.loads(message)
+            msg = await ws.receive_json()
 
-            if payload.get("type") == "image":
-                dataurl = payload.get("data")  # 例: "data:image/jpeg;base64,...."
-                room.latest_image_base64 = dataurl
-                # 他のクライアントへブロードキャスト
-                dead_clients = []
-                for client in room.clients:
-                    try:
-                        if client is not websocket:  # 送信者以外にも送る（同じ端末で確認したいならこのifを外す）
-                            await client.send_text(json.dumps({"type": "image", "data": dataurl}))
-                    except Exception:
-                        dead_clients.append(client)
-                for dc in dead_clients:
-                    room.clients.discard(dc)
-            else:
-                # 任意のメッセージ種別に拡張可能
-                pass
+            # ★ delete 以外は必ず id を補完
+            if msg["type"] != "delete":
+                msg.setdefault("id", str(uuid4()))
+
+            if msg["type"] == "chat":
+                history[room_id].append(msg)
+            elif msg["type"] == "photo":
+                # 写真メッセージを履歴に保存
+                history[room_id].append(msg)
+                print(f"�� ルーム {room_id} で写真メッセージを受信: データ長 {len(msg.get('data', ''))}")
+            elif msg["type"] == "notification":
+                # 通知メッセージを履歴に保存
+                history[room_id].append(msg)
+                print(f"�� ルーム {room_id} で通知メッセージを受信: {msg.get('data', '')}")
+            elif msg["type"] == "delete":
+                history[room_id] = [m for m in history[room_id] if m["id"] != msg["id"]]
+
+            # 同じルーム内の全クライアントにブロードキャスト
+            await manager.broadcast_to_room(room_id, msg)
 
     except WebSocketDisconnect:
-        room.clients.discard(websocket)
-    except Exception:
-        room.clients.discard(websocket)
-        # 本番ではログ出力など
+        manager.disconnect(room_id, ws)
+
+@router.get("/")
+async def root():
+    return {"status": "ok", "message": "WebSocket server running"}  
