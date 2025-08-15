@@ -68,19 +68,11 @@ async def socket(ws: WebSocket, room_id: str):
             elif msg["type"] == "photo":
                 # 写真メッセージを履歴に保存
                 history[room_id].append(msg)
-<<<<<<< HEAD
                 print(f"📸 ルーム {room_id} で写真メッセージを受信: データ長 {len(msg.get('data', ''))}")
             elif msg["type"] == "notification":
                 # 通知メッセージを履歴に保存
                 history[room_id].append(msg)
                 print(f"📢 ルーム {room_id} で通知メッセージを受信: {msg.get('data', '')}")
-=======
-                print(f"�� ルーム {room_id} で写真メッセージを受信: データ長 {len(msg.get('data', ''))}")
-            elif msg["type"] == "notification":
-                # 通知メッセージを履歴に保存
-                history[room_id].append(msg)
-                print(f"�� ルーム {room_id} で通知メッセージを受信: {msg.get('data', '')}")
->>>>>>> 9a0962863c4740792446c397e39bfc302e1fa613
             elif msg["type"] == "delete":
                 history[room_id] = [m for m in history[room_id] if m["id"] != msg["id"]]
 
@@ -92,8 +84,4 @@ async def socket(ws: WebSocket, room_id: str):
 
 @router.get("/")
 async def root():
-<<<<<<< HEAD
     return {"status": "ok", "message": "WebSocket server running"}
-=======
-    return {"status": "ok", "message": "WebSocket server running"}  
->>>>>>> 9a0962863c4740792446c397e39bfc302e1fa613
