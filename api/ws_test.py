@@ -81,3 +81,7 @@ async def socket(ws: WebSocket, room_id: str):
 
     except WebSocketDisconnect:
         manager.disconnect(room_id, ws)
+
+@router.get("/")
+async def root():
+    return {"status": "ok", "message": "WebSocket server running"}
