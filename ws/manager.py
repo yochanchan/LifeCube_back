@@ -30,7 +30,7 @@ class RoomState:
 
 
 class RoomManager:
-    """room=acc:<account_id> 単位で WS を管理。Phase2: 役割・上限制御つき。
+    """room=acc:<account_id> 単位で WS を管理。Phase3: 役割・上限制御 + TTL剥奪 + 安全な寿命管理。
     送信I/Oはロック外で行い、送信失敗の掃除は remove() に委ねる。
     """
 
@@ -39,10 +39,31 @@ class RoomManager:
         self._lock = asyncio.Lock()
         # RECORDERのTTL（秒）。touch() 更新がこの秒数を超えると剥奪。
         self._ttl_seconds = 20
-        # TTLスイーパ（2秒毎）
-        asyncio.create_task(self._sweeper())
+        # 起動/停止をアプリの lifecycle から行う
+        self._sweeper_task: Optional[asyncio.Task[None]] = None
 
-    # ───────── 低レベル: 接続の追加/削除/タッチ ─────────
+    # ---- lifecycle -------------------------------------------------
+
+    def start(self) -> None:
+        """アプリ起動時に呼ぶ。イベントループ確立後に sweeper を開始。"""
+        if self._sweeper_task and not self._sweeper_task.done():
+            return
+        self._sweeper_task = asyncio.create_task(self._sweeper())
+
+    async def stop(self) -> None:
+        """アプリ停止時に呼ぶ。sweeper を安全に停止。"""
+        t = self._sweeper_task
+        if not t:
+            return
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._sweeper_task = None
+
+    # ---- 低レベル: 接続の追加/削除/タッチ ---------------------------
 
     async def add(self, room: str, device_id: str, ws: WebSocket) -> None:
         """接続を登録。既存deviceがあれば置き換える。
@@ -88,7 +109,7 @@ class RoomManager:
             if c:
                 c.last_seen = time.time()
 
-    # ───────── 役割/人数 ─────────
+    # ---- 役割/人数 -------------------------------------------------
 
     async def join_role(self, room: str, device_id: str, role: str) -> Tuple[bool, Optional[str], Dict[str, int]]:
         """
@@ -144,7 +165,7 @@ class RoomManager:
             rs.photo_seq += 1
             return rs.photo_seq
 
-    # ───────── ブロードキャスト ─────────
+    # ---- ブロードキャスト -----------------------------------------
 
     async def broadcast_json(
         self,
@@ -159,7 +180,6 @@ class RoomManager:
             rs = self._rooms.get(room)
             if not rs:
                 return 0
-            # (device_id, WebSocket) のスナップショットを作る
             targets: List[Tuple[str, WebSocket]] = [
                 (dev_id, cli.ws)
                 for dev_id, cli in rs.connections.items()
@@ -175,7 +195,6 @@ class RoomManager:
             except Exception:
                 dead.append(dev_id)
 
-        # 失敗クライアントの掃除（ロックは remove 側で取得）
         for dev_id in dead:
             try:
                 await self.remove(room, dev_id)
@@ -184,38 +203,38 @@ class RoomManager:
 
         return sent
 
-    # ───────── TTLスイーパ ─────────
+    # ---- TTLスイーパ ----------------------------------------------
 
     async def _sweeper(self) -> None:
         """2秒毎にRECORDERのTTLを監視し、期限切れなら剥奪して通知する。"""
-        while True:
-            await asyncio.sleep(2)
-            now = time.time()
-            # 剥奪対象の room をロック内で抽出
-            to_revoke: List[str] = []
-            async with self._lock:
-                for room, rs in list(self._rooms.items()):
-                    rec = rs.recorder
-                    if not rec:
-                        continue
-                    cli = rs.connections.get(rec)
-                    if (not cli) or (now - cli.last_seen > self._ttl_seconds):
-                        # RECORDERを空に
-                        rs.recorder = None
-                        to_revoke.append(room)
+        try:
+            while True:
+                await asyncio.sleep(2)
+                now = time.time()
+                to_revoke: List[str] = []
+                async with self._lock:
+                    for room, rs in list(self._rooms.items()):
+                        rec = rs.recorder
+                        if not rec:
+                            continue
+                        cli = rs.connections.get(rec)
+                        if (not cli) or (now - cli.last_seen > self._ttl_seconds):
+                            rs.recorder = None
+                            to_revoke.append(room)
 
-            # ロック外で通知（revoked → roster_update）
-            for room in to_revoke:
-                try:
-                    await self.broadcast_json(room, {"type": "recorder_revoked"})
-                    roster = await self.get_roster(room)
-                    await self.broadcast_json(room, {"type": "roster_update", **roster})
-                except Exception:
-                    # 通知失敗は次ループで再評価されるので握りつぶし
-                    pass
+                for room in to_revoke:
+                    try:
+                        await self.broadcast_json(room, {"type": "recorder_revoked"})
+                        roster = await self.get_roster(room)
+                        await self.broadcast_json(room, {"type": "roster_update", **roster})
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            # シャットダウン時の正常停止
+            return
 
 
-# 明示注釈でPylanceに型を伝える（broadcast_json 未検出エラー回避）
+# 型注釈つきでエクスポート（Pylance対策）
 manager: RoomManager = RoomManager()
 
 __all__ = ["Client", "RoomState", "RoomManager", "manager"]
