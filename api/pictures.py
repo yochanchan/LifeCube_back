@@ -165,7 +165,7 @@ def get_pictures_by_date(
             account_id=effective_id,
             target_date=date,
             trip_id=trip_id,
-            order_desc=False,
+            order_desc=True,
             thumb_w=thumb_w,
         )
     except ValueError as e:
