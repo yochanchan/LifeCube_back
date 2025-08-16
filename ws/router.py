@@ -8,7 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from starlette.websockets import WebSocketState
 
 from .manager import manager
-from .schemas import WsInMsg, MsgTakePhoto
+from .schemas import WsInMsg, MsgTakePhoto, MsgPhotoUploadedIn
 
 router = APIRouter()
 
@@ -71,7 +71,31 @@ async def room_ws(
 
             elif typ == "take_photo":
                 take = cast(MsgTakePhoto, msg)
+                # 発信元を除外してブロードキャスト（現行踏襲）
                 await manager.broadcast_json(room_final, take, exclude_device_id=device_final)
+
+            elif typ == "photo_uploaded":
+                up = cast(MsgPhotoUploadedIn, msg)
+                # device_id は接続情報で上書き（偽装対策）
+                device = device_final
+                # image_url が空なら保険で組み立て（通常は来る）
+                picture_id = int(up["picture_id"])
+                image_url = up.get("image_url") or f"/api/pictures/{picture_id}/image"
+                pictured_at = up.get("pictured_at")
+
+                seq = await manager.next_seq(room_final)
+                out = {
+                    "type": "photo_uploaded",
+                    "seq": seq,
+                    "picture_id": picture_id,
+                    "device_id": device,
+                    "image_url": image_url,
+                }
+                if pictured_at:
+                    out["pictured_at"] = pictured_at
+
+                # 送信者含めて全員に通知（RECORDER は“自分以外を表示”のロジック側で制御）
+                await manager.broadcast_json(room_final, out)
 
             else:
                 # 未知メッセージは無視

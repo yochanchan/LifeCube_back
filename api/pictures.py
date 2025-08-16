@@ -1,7 +1,7 @@
 # backend/api/pictures.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
 
 from fastapi import (
@@ -39,6 +39,11 @@ def get_db():
         raise
     finally:
         db.close()
+
+# ─────────────────────────────────────────
+# JST ヘルパ
+# ─────────────────────────────────────────
+JST = timezone(timedelta(hours=9))
 
 # ─────────────────────────────────────────
 # device_id の簡易推定（User-Agent から）
@@ -98,6 +103,9 @@ async def create_picture(
     account_id = current.account_id
     device_id_final = _pick_device_id(request, device_id)
 
+    # pictured_at が未指定なら「サーバ側 JST 現在」を採用
+    pictured_at_final: datetime = pictured_at or datetime.now(JST)
+
     try:
         image_binary = await file.read()
         content_type = file.content_type or "application/octet-stream"
@@ -109,14 +117,18 @@ async def create_picture(
             device_id=device_id_final,
             image_binary=image_binary,
             content_type=content_type,
-            pictured_at=pictured_at,
+            pictured_at=pictured_at_final,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # ★ レスポンス拡張：image_path を追加（フル画像URL）
     return {
         "picture_id": pic_id,
-        "thumbnail_path": f"/api/pictures/{pic_id}/thumbnail?w=256",
+        "thumbnail_path": f"/api/pictures/{pic_id}/thumbnail?w=256",  # 互換のため残す
+        "image_path": f"/api/pictures/{pic_id}/image",                # ← 新規
+        "pictured_at": pictured_at_final.isoformat(),                 # 例: 2025-08-16T12:34:56+09:00
+        "device_id": device_id_final,                                 # 例: "android" / "dev_xxx" / None
     }
 
 # ---------------------------
