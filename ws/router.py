@@ -1,3 +1,4 @@
+# backend/ws/router.py
 from __future__ import annotations
 
 import json
@@ -158,6 +159,9 @@ async def room_ws(
 async def ws_roster(room: Optional[str] = Query(default=None)):
     if not _is_valid_room(room):
         return {"recorder": None, "shooters": [], "counts": {"recorder": 0, "shooter": 0}}
+
+    # ここまで来たら room は acc: で始まる非 None の文字列とみなしてよい
+    assert room is not None
     return await manager.get_roster(room)
 
 @router.get("/ws-debug")

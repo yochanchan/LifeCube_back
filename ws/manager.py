@@ -1,9 +1,10 @@
+# backend/ws/manager.py
 from __future__ import annotations
 
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Mapping, Any, Set, Tuple
+from typing import Dict, Optional, Mapping, Any, Set, Tuple, List
 
 from starlette.websockets import WebSocket
 
@@ -29,27 +30,40 @@ class RoomState:
 
 
 class RoomManager:
-    """room=acc:<account_id> 単位で WS を管理。Phase2: 役割・上限制御つき。"""
+    """room=acc:<account_id> 単位で WS を管理。Phase2: 役割・上限制御つき。
+    送信I/Oはロック外で行い、送信失敗の掃除は remove() に委ねる。
+    """
 
     def __init__(self) -> None:
         self._rooms: Dict[str, RoomState] = {}
         self._lock = asyncio.Lock()
+        # RECORDERのTTL（秒）。touch() 更新がこの秒数を超えると剥奪。
+        self._ttl_seconds = 20
+        # TTLスイーパ（2秒毎）
+        asyncio.create_task(self._sweeper())
 
     # ───────── 低レベル: 接続の追加/削除/タッチ ─────────
 
     async def add(self, room: str, device_id: str, ws: WebSocket) -> None:
+        """接続を登録。既存deviceがあれば置き換える。
+        古い接続の close() はロック外で実行してデッドロックを避ける。
+        """
+        old_ws: Optional[WebSocket] = None
         async with self._lock:
             rs = self._rooms.setdefault(room, RoomState())
-            # 同一 device_id の既存接続があるなら閉じて置き換える（多重防止）
             old = rs.connections.get(device_id)
             if old:
-                try:
-                    await old.ws.close()
-                except Exception:
-                    pass
+                old_ws = old.ws  # ロック解除後にclose
             rs.connections[device_id] = Client(ws=ws, device_id=device_id)
 
+        if old_ws:
+            try:
+                await old_ws.close()
+            except Exception:
+                pass
+
     async def remove(self, room: str, device_id: str) -> None:
+        """接続を削除し、役割からも外す。部屋が空になればルーム自体を破棄。"""
         async with self._lock:
             rs = self._rooms.get(room)
             if not rs:
@@ -65,6 +79,7 @@ class RoomManager:
                 self._rooms.pop(room, None)
 
     async def touch(self, room: str, device_id: str) -> None:
+        """心拍（ping）による最終時刻更新。TTL監視で利用。"""
         async with self._lock:
             rs = self._rooms.get(room)
             if not rs:
@@ -99,7 +114,6 @@ class RoomManager:
                     return (False, "recorder_full", limits)
                 # 取得
                 rs.recorder = device_id
-                # shooters 側にも入っていれば維持して良い（仕様次第だがここでは放置）
                 return (True, None, limits)
 
             # role == "shooter"
@@ -138,27 +152,70 @@ class RoomManager:
         payload: Mapping[str, Any],
         exclude_device_id: Optional[str] = None,
     ) -> int:
-        """room 内の全クライアントに送信（exclude は除外）。戻り値は送信数。"""
+        """room 内の全クライアントに送信（exclude は除外）。戻り値は送信数。
+        送信ターゲットのスナップショット取得のみロック内、実送信はロック外。
+        """
         async with self._lock:
             rs = self._rooms.get(room)
             if not rs:
                 return 0
-            targets = list(rs.connections.values())
+            # (device_id, WebSocket) のスナップショットを作る
+            targets: List[Tuple[str, WebSocket]] = [
+                (dev_id, cli.ws)
+                for dev_id, cli in rs.connections.items()
+                if not (exclude_device_id and dev_id == exclude_device_id)
+            ]
 
+        dead: List[str] = []
         sent = 0
-        for cli in targets:
-            if exclude_device_id and cli.device_id == exclude_device_id:
-                continue
+        for dev_id, ws in targets:
             try:
-                await cli.ws.send_json(payload)
+                await ws.send_json(payload)
                 sent += 1
             except Exception:
-                try:
-                    await cli.ws.close()
-                except Exception:
-                    pass
-                await self.remove(room, cli.device_id)
+                dead.append(dev_id)
+
+        # 失敗クライアントの掃除（ロックは remove 側で取得）
+        for dev_id in dead:
+            try:
+                await self.remove(room, dev_id)
+            except Exception:
+                pass
+
         return sent
 
+    # ───────── TTLスイーパ ─────────
 
-manager = RoomManager()
+    async def _sweeper(self) -> None:
+        """2秒毎にRECORDERのTTLを監視し、期限切れなら剥奪して通知する。"""
+        while True:
+            await asyncio.sleep(2)
+            now = time.time()
+            # 剥奪対象の room をロック内で抽出
+            to_revoke: List[str] = []
+            async with self._lock:
+                for room, rs in list(self._rooms.items()):
+                    rec = rs.recorder
+                    if not rec:
+                        continue
+                    cli = rs.connections.get(rec)
+                    if (not cli) or (now - cli.last_seen > self._ttl_seconds):
+                        # RECORDERを空に
+                        rs.recorder = None
+                        to_revoke.append(room)
+
+            # ロック外で通知（revoked → roster_update）
+            for room in to_revoke:
+                try:
+                    await self.broadcast_json(room, {"type": "recorder_revoked"})
+                    roster = await self.get_roster(room)
+                    await self.broadcast_json(room, {"type": "roster_update", **roster})
+                except Exception:
+                    # 通知失敗は次ループで再評価されるので握りつぶし
+                    pass
+
+
+# 明示注釈でPylanceに型を伝える（broadcast_json 未検出エラー回避）
+manager: RoomManager = RoomManager()
+
+__all__ = ["Client", "RoomState", "RoomManager", "manager"]
