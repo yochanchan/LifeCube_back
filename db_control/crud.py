@@ -64,6 +64,7 @@ def list_picture_dates(
         stmt = stmt.where(Picture.trip_id == trip_id)
     stmt = stmt.group_by(day_expr).order_by(day_expr.asc())
     rows = db.execute(stmt).all()
+    # MySQLのdate型 or 文字列の両対応
     return [r[0].isoformat() if isinstance(r[0], date) else str(r[0]) for r in rows]
 
 # 2) 指定1日分の picture 一覧（メタ＋サムネURLヒント）
@@ -89,25 +90,29 @@ def list_pictures_by_date(
     return [_picture_to_dict(p, thumb_w=thumb_w) for p in pics]
 
 def delete_picture_one(db: Session, picture_id: int, owner_account_id: Optional[int] = None) -> bool:
-    # 書き込み系は明示トランザクション
-    with db.begin():
-        pic = db.get(Picture, picture_id)
-        if not pic:
-            return False
-        if owner_account_id is not None and pic.account_id != owner_account_id:
-            return False
-        db.delete(pic)
+    """
+    書き込み系。呼び出し側で `with db.begin():` を必ず張ること。
+    """
+    pic = db.get(Picture, picture_id)
+    if not pic:
+        return False
+    if owner_account_id is not None and pic.account_id != owner_account_id:
+        return False
+    db.delete(pic)
+    # フラッシュは不要（ルート側の commit で実行される）
     return True
 
 def create_trip(db: Session, account_id: int, started_at: Optional[datetime] = None) -> int:
+    """
+    書き込み系。呼び出し側で `with db.begin():` を必ず張ること。
+    """
     started_at = started_at or _now_jst()
-    with db.begin():
-        if not db.get(Account, account_id):
-            raise ValueError(f"account not found: {account_id}")
-        trip = Trip(account_id=account_id, trip_started_at=_to_jst_naive(started_at))
-        db.add(trip)
-        db.flush()
-        return trip.trip_id
+    if not db.get(Account, account_id):
+        raise ValueError(f"account not found: {account_id}")
+    trip = Trip(account_id=account_id, trip_started_at=_to_jst_naive(started_at))
+    db.add(trip)
+    db.flush()  # trip_id を採番
+    return trip.trip_id
 
 def create_picture_with_data(
     db: Session,
@@ -125,6 +130,9 @@ def create_picture_with_data(
     user_comment: Optional[str] = None,
     max_bytes: int = 16 * 1024 * 1024,
 ) -> int:
+    """
+    書き込み系。呼び出し側で `with db.begin():` を必ず張ること。
+    """
     if not image_binary:
         raise ValueError("image_binary is empty")
     if len(image_binary) > max_bytes:
@@ -136,37 +144,36 @@ def create_picture_with_data(
     digest = sha256(image_binary).digest()
     size = len(image_binary)
 
-    with db.begin():
-        if not db.get(Account, account_id):
-            raise ValueError(f"account not found: {account_id}")
-        if trip_id is not None:
-            t = db.get(Trip, trip_id)
-            if not t:
-                raise ValueError(f"trip not found: {trip_id}")
-            if t.account_id != account_id:
-                raise ValueError("trip does not belong to the account")
+    if not db.get(Account, account_id):
+        raise ValueError(f"account not found: {account_id}")
+    if trip_id is not None:
+        t = db.get(Trip, trip_id)
+        if not t:
+            raise ValueError(f"trip not found: {trip_id}")
+        if t.account_id != account_id:
+            raise ValueError("trip does not belong to the account")
 
-        pic = Picture(
-            account_id=account_id,
-            trip_id=trip_id,
-            pictured_at=_to_jst_naive(pictured_at),
-            gps_lat=gps_lat,
-            gps_lng=gps_lng,
-            device_id=device_id,
-            speech=speech,
-            situation_for_quiz=situation_for_quiz,
-            user_comment=user_comment,
-            content_type=content_type,
-            image_size=size,
-            sha256=digest,
-        )
-        db.add(pic)
-        db.flush()  # picture_id 採番
+    pic = Picture(
+        account_id=account_id,
+        trip_id=trip_id,
+        pictured_at=_to_jst_naive(pictured_at),
+        gps_lat=gps_lat,
+        gps_lng=gps_lng,
+        device_id=device_id,
+        speech=speech,
+        situation_for_quiz=situation_for_quiz,
+        user_comment=user_comment,
+        content_type=content_type,
+        image_size=size,
+        sha256=digest,
+    )
+    db.add(pic)
+    db.flush()  # picture_id 採番
 
-        pdata = PictureData(picture_id=pic.picture_id, image_binary=image_binary)
-        db.add(pdata)
+    pdata = PictureData(picture_id=pic.picture_id, image_binary=image_binary)
+    db.add(pdata)
 
-        return pic.picture_id
+    return pic.picture_id
 
 def get_picture_image(db: Session, picture_id: int) -> Optional[Tuple[str, bytes]]:
     pic = db.get(Picture, picture_id)

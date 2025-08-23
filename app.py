@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.pictures import router as pictures_router
-from api.auth import router as auth_router
+from auth.routes import router as auth_router
 from ws.router import router as ws_router                # /ws（WebSocket）
 from api.azure_speech import router as azure_speech_router
 from ws.manager import manager                           # ← lifecycle で start/stop を呼ぶ
@@ -32,7 +32,7 @@ app.add_middleware(
         "http://localhost:3000",
         "https://app-002-gen10-step3-2-node-oshima10.azurewebsites.net",
     ],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
