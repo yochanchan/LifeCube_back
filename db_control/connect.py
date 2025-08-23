@@ -1,5 +1,6 @@
 # backend/db_control/connect.py
 from __future__ import annotations
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 import os
@@ -16,7 +17,7 @@ DB_NAME = os.getenv("DB_NAME")
 # MySQLのURL構築
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# ── 環境で CA パスが指定されていれば追加 ──
+# ── 環境で CA パスが指定されていれば追加（PyMySQL は ssl={"ca": "..."} 形式） ──
 SSL_CA_PATH = os.getenv("SSL_CA_PATH")  # .env で指定（ローカルだけ入れる）
 
 connect_args = {}
@@ -30,3 +31,20 @@ engine = create_engine(
     pool_recycle=3600,
     connect_args=connect_args,
 )
+
+SessionLocal = sessionmaker(
+    bind=engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db      # ← ここで commit しない（ハンドラ側で commit する）
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

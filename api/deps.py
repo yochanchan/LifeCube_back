@@ -1,22 +1,34 @@
 # backend/api/deps.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from fastapi import Depends, HTTPException, Request, status
+import os
+from typing import Final
+from pydantic import BaseModel
 
-from auth.session import get_session  # Cookieからセッションを取り出す
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import jwt
+from jose.exceptions import JWTError
 
-@dataclass
-class CurrentUser:
+class CurrentUser(BaseModel):
     account_id: int
-    role: str  # "admin" or "user"
+    role: str | None = None
 
-def get_current_user(request: Request) -> CurrentUser:
-    """
-    クッキーセッション必須。未ログインなら 401。
-    ログイン済みなら account_id / role を返す。
-    """
-    s = get_session(request)
-    if not s:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    return CurrentUser(account_id=s.account_id, role=s.role)
+bearer = HTTPBearer(auto_error=True)
+
+_secret = os.getenv("JWT_SECRET")
+if not _secret:
+    raise RuntimeError("JWT_SECRET is not set")
+SECRET: Final[str] = _secret
+ALG: Final[str] = "HS256"
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> CurrentUser:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET, algorithms=[ALG])
+        sub = payload.get("sub")
+        if sub is None:
+            raise HTTPException(status_code=401, detail="invalid token (no sub)")
+        return CurrentUser(account_id=int(sub), role=payload.get("role"))
+    except JWTError:
+        raise HTTPException(status_code=401, detail="invalid token")
