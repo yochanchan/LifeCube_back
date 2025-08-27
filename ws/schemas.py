@@ -22,7 +22,8 @@ class MsgPhotoUploadedIn(MsgBase):
     picture_id: int
     image_url: NotRequired[str]
     pictured_at: NotRequired[str]
-    device_id: NotRequired[str]  # クライアントから来てもサーバ側で上書き
+    device_id: NotRequired[str]     # サーバで上書き
+    seq: NotRequired[int]           # ★ 追加: トリガts（共有ID）
 
 class MsgPing(MsgBase):
     type: Literal["ping"]
@@ -51,7 +52,8 @@ class MsgRosterUpdate(TypedDict):
 
 class MsgPhotoUploadedOut(TypedDict):
     type: Literal["photo_uploaded"]
-    seq: int
+    seq: int                        # ★ ts をそのまま返す（統一ドメイン）
+    room_seq: NotRequired[int]      # ★ 任意: デバッグ/可観測性用
     picture_id: int
     device_id: str
     image_url: str
