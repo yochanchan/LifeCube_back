@@ -31,6 +31,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://app-002-gen10-step3-2-node-oshima10.azurewebsites.net",
+        "https://app-lifecube-frontend.azurewebsites.net",
     ],
     allow_credentials=False,
     allow_methods=["*"],
